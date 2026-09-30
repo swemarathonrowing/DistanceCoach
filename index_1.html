@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="DistanceCoach">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>Distance Coach</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: #ffffff;
+    --ink: #2e2e2e;
+    --ink-mid: #757575;
+    --line: #2e2e2e;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; background:var(--paper); color:var(--ink); font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;
+    overflow:hidden; overscroll-behavior:none; -webkit-user-select:none; user-select:none; height:100%; }
+  .mono{ font-family:'Chivo Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+  .hidden{ display:none !important; }
+
+  /* ---------- "add to home screen" notice ---------- */
+  #a2hsBanner{
+    position:fixed; top:0; left:0; right:0; z-index:200; background:var(--ink); color:var(--paper);
+    display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 14px;
+    padding-top:calc(10px + env(safe-area-inset-top));
+    font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; font-size:11.5px; line-height:1.4;
+  }
+  #a2hsBanner.hidden{ display:none; }
+  #a2hsBanner .a2hsText{ flex:1; }
+  #a2hsBanner .a2hsText strong{ display:block; font-size:12.5px; margin-bottom:2px; }
+  #a2hsBanner .a2hsText span{ color:#cfcfcf; }
+  #a2hsClose{ border:none; background:transparent; color:var(--paper); font-size:16px; padding:2px 8px; flex:0 0 auto; font-weight:400; }
+
+  /* ---------- rotate-device gate ---------- */
+  #rotate{
+    display:none; position:fixed; inset:0; background:var(--paper); z-index:100;
+    flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:30px; text-align:center;
+  }
+  #rotate .icon{ font-size:40px; transform:rotate(90deg); }
+  #rotate h2{ margin:0; font-size:16px; letter-spacing:1px; color:var(--ink); }
+  #rotate p{ margin:0; color:var(--ink-mid); font-size:12.5px; max-width:250px; }
+  @media (orientation: portrait){
+    #rotate{ display:flex; }
+    #app, #gate, #menuPanel{ display:none !important; }
+  }
+
+  /* ================= APP: split layout — stats left, chart right ================= */
+  #app{ position:fixed; inset:0; display:flex; flex-direction:row; }
+
+  /* ---------- stats panel ---------- */
+  #stats{
+    flex:0 0 50%; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
+    position:relative; background:var(--paper);
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .cell{ display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; }
+  #c-split{ border-right:2px solid var(--line); border-bottom:2px solid var(--line); }
+  #c-spm{ border-bottom:2px solid var(--line); }
+  #c-dist{ border-right:2px solid var(--line); }
+  #c-time{ }
+
+  .cell .lbl{ font-size:12px; letter-spacing:2.5px; color:var(--ink); text-transform:uppercase; font-weight:300; margin-bottom:6px; }
+  .cell .v{ font-weight:900; line-height:1; color:var(--ink); white-space:nowrap; font-variant-numeric:tabular-nums;
+    font-size:clamp(28px, 8.5vw, 64px); max-width:100%; }
+  .cell .u{ font-size:12px; letter-spacing:1.5px; color:var(--ink); text-transform:uppercase; margin-top:6px; font-weight:300; }
+
+  /* Reset sits at the visual crossing point of the 2x2 grid. #stats carries
+     asymmetric safe-area padding (only on the device-facing edges), which
+     shifts its naive 50%/50% box center away from the grid's actual visual
+     center — the calc() below adds back half of that inset so the button
+     lines up with the crossing point on notched phones in landscape. */
+  #btnReset{
+    position:absolute; z-index:5;
+    left: calc(50% + (env(safe-area-inset-left, 0px) / 2));
+    top: calc(50% + (env(safe-area-inset-top, 0px) / 2) - (env(safe-area-inset-bottom, 0px) / 2));
+    transform:translate(-50%,-50%);
+    width:56px; height:56px; border-radius:20px; background:var(--paper); border:2.5px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #btnReset svg{ width:26px; height:26px; }
+  #btnReset:active{ background:var(--ink); }
+  #btnReset:active svg *{ stroke:var(--paper) !important; }
+
+  #menuBtn{
+    position:absolute; top:16px; left:16px; z-index:5; padding:7px;
+    width:46px; height:46px; border-radius:14px; border:2px solid var(--line); background:var(--paper);
+    display:flex; align-items:center; justify-content:center; -webkit-appearance:none; appearance:none; cursor:pointer;
+  }
+  #menuBtn:active{ background:#eee; }
+  #menuBtn svg{ width:100%; height:100%; }
+
+  /* ---------- chart panel ---------- */
+  #mapViewport{ flex:1 1 50%; position:relative; overflow:hidden; background:var(--paper); }
+  #map{
+    position:absolute; top:50%; left:50%; width:260%; height:260%;
+    transform-origin:50% 50%; transform:translate(-50%,-50%) rotate(0deg);
+    transition: transform 0.35s linear;
+  }
+  /* base land/water rendering stays grayscale for the two-tone look, but the
+     seamark navigation layer (buoys, lights) stays in color — red/port and
+     green/starboard marks are safety-critical and must stay distinguishable */
+  .baseGray{ filter: grayscale(1) contrast(1.3) brightness(1.12); }
+
+  .boatMarker{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; }
+  .boatArrow{ width:0; height:0; border-left:9px solid transparent; border-right:9px solid transparent;
+    border-bottom:20px solid var(--ink); filter: drop-shadow(0 0 1.5px var(--paper)) drop-shadow(0 0 1.5px var(--paper)); }
+
+  .wpDot{ width:22px; height:22px; border-radius:50%; background:#FD08FF; color:#ffffff;
+    font-size:11px; font-weight:900; display:flex; align-items:center; justify-content:center;
+    border:2px solid var(--paper); font-family:'Chivo Mono',monospace; box-shadow:0 0 0 1px var(--ink); }
+
+  #courseReadout{
+    position:absolute; right:18px; bottom:14px; z-index:5; font-weight:700; letter-spacing:1px;
+    font-size:clamp(20px,4vw,30px); color:var(--ink); font-family:'Chivo Mono',ui-monospace,monospace;
+    text-shadow: 0 0 4px var(--paper), 0 0 8px var(--paper), 0 0 12px var(--paper);
+  }
+  #navReadout{
+    position:absolute; left:18px; top:14px; z-index:5; font-weight:700; font-size:clamp(13px,2.6vw,16px);
+    color:var(--ink); background:rgba(255,255,255,0.88); padding:5px 10px; border-radius:8px; border:2px solid var(--line);
+    font-family:'Chivo Mono',ui-monospace,monospace;
+  }
+
+  #btnRecenter{
+    position:absolute; left:14px; bottom:14px; z-index:6; width:44px; height:44px; border-radius:14px;
+    background:rgba(255,255,255,0.92); border:2px solid var(--line); display:flex; align-items:center; justify-content:center;
+    padding:0; -webkit-appearance:none; appearance:none;
+  }
+  #btnRecenter.hidden{ display:none; }
+  #btnRecenter svg{ width:22px; height:22px; }
+  #btnRecenter:active{ background:var(--ink); }
+  #btnRecenter:active svg *{ stroke:var(--paper) !important; }
+
+  .leaflet-control-attribution{ font-size:8px !important; }
+
+  /* ---------- permission gate ---------- */
+  #gate{
+    position:fixed; inset:0; background:var(--paper); z-index:50;
+    display:flex; align-items:center; justify-content:center; gap:32px; padding:20px 40px; text-align:center;
+  }
+  #gate.hidden{ display:none; }
+  #gate .copy{ max-width:300px; text-align:left; }
+  #gate .logoWrap{ height:54px; width:auto; margin-bottom:2px; display:block; }
+  #gate .oar{ font-size:10.5px; color:var(--ink-mid); letter-spacing:3px; text-transform:uppercase; margin:8px 0 9px; font-weight:300; }
+  #gate p{ color:var(--ink-mid); font-size:12px; line-height:1.5; margin:0; font-weight:300; }
+  #gate p.madeBy{ margin-top:14px; font-size:10.5px; letter-spacing:0.5px; text-transform:uppercase; font-weight:300; color:var(--ink-mid); }
+  #gate .actions{ display:flex; flex-direction:column; gap:9px; width:210px; }
+  button{ border:2px solid var(--line); border-radius:8px; font-size:12px; font-weight:700; letter-spacing:0.5px;
+    text-transform:uppercase; font-family:inherit; color:var(--ink); background:var(--paper); }
+  #gate .actions button{ padding:12px 0; }
+  #gate #btnGrant{ background:var(--ink); color:var(--paper); }
+  #gate .skip{ border:none; background:transparent; color:var(--ink-mid); font-size:11px; text-decoration:underline; text-transform:none; letter-spacing:0; font-weight:300; padding:4px; }
+
+  /* ---------- menu: history + waypoints ---------- */
+  #menuPanel{ position:fixed; inset:0; z-index:60; background:var(--paper); display:flex; flex-direction:column; }
+  #menuPanel.hidden{ display:none; }
+  #menuHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px;
+    border-bottom:2px solid var(--line); padding-top:calc(12px + env(safe-area-inset-top)); }
+  .menuTabs{ display:flex; gap:8px; }
+  .tabBtn{ border:2px solid var(--line); border-radius:8px; padding:8px 14px; font-size:11px; letter-spacing:1px;
+    text-transform:uppercase; font-weight:700; background:var(--paper); color:var(--ink); }
+  .tabBtn.active{ background:var(--ink); color:var(--paper); }
+  #menuClose{ border:none; background:transparent; font-size:20px; color:var(--ink); padding:4px 10px; font-weight:400; }
+  .tabPane{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 16px; }
+  .tabPane.hidden{ display:none; }
+
+  .histItem{ border:2px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .histItem .histDate{ font-size:11px; font-weight:300; letter-spacing:1px; text-transform:uppercase; color:var(--ink-mid); margin-bottom:6px; }
+  .histItem .histMain{ font-size:26px; font-weight:900; }
+  .histItem .histRow{ display:flex; gap:16px; margin-top:6px; font-size:12px; font-weight:300; color:var(--ink-mid); }
+  .histEmpty{ color:var(--ink-mid); font-size:12px; font-weight:300; text-align:center; margin-top:40px; line-height:1.6; }
+
+  #wpMapWrap{ height:42vh; min-height:190px; border:2px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:12px; }
+  #wpMap{ width:100%; height:100%; }
+  #wpControls label{ display:block; font-size:12px; font-weight:300; margin-bottom:12px; }
+  #wpControls input[type=number]{ width:60px; font-family:inherit; font-size:13px; font-weight:700;
+    border:2px solid var(--line); border-radius:6px; padding:4px 6px; margin:0 4px; text-align:center; }
+  .wpRow{ display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #ddd; padding:9px 0; font-size:12px; }
+  .wpRow .wpName{ font-weight:700; }
+  .wpRow .wpDist{ font-weight:300; color:var(--ink-mid); }
+  .wpTotal{ font-size:13px; font-weight:700; color:var(--ink); margin-bottom:10px; padding-bottom:10px; border-bottom:2px solid var(--line); }
+  .wpTotal .wpTotalLbl{ font-weight:300; color:var(--ink-mid); text-transform:uppercase; letter-spacing:1px; font-size:11px; margin-right:8px; }
+  .wpRow .wpDel{ border:none; background:transparent; color:#b00020; font-size:15px; padding:2px 6px; font-weight:400; }
+  .wpActions{ display:flex; gap:10px; margin-top:14px; }
+  .wpActions button{ flex:1; padding:12px 0; }
+  #wpSaveNav{ background:var(--ink); color:var(--paper); }
+</style>
+</head>
+<body>
+
+<div id="a2hsBanner" class="hidden">
+  <div class="a2hsText">
+    <strong>Want this fullscreen, with no browser bar?</strong>
+    <span id="a2hsInstr">A website can't remove its browser's own address bar — that's a browser security rule, on Safari, Chrome and everywhere else. Add DistanceCoach to your Home Screen and open it from there instead.</span>
+  </div>
+  <button id="a2hsClose" aria-label="Dismiss">✕</button>
+</div>
+
+<div id="rotate">
+  <div class="icon">📱</div>
+  <h2>Rotate to landscape</h2>
+  <p>Distance Coach is built to be mounted landscape in the boat.</p>
+</div>
+
+<div id="gate">
+  <div class="copy">
+    <svg class="logoWrap" viewBox="0 0 208 132" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M56.3564 104.401C56.8042 105.671 57.363 106.97 58.0576 108.255L25.1533 131.261L25.1445 131.25C24.5513 131.66 23.5009 131.273 22.7939 130.379C22.0869 129.484 21.9903 128.432 22.5849 128.011L56.3564 104.401ZM185.409 128.011C186.003 128.432 185.907 129.484 185.2 130.379C184.493 131.273 183.443 131.66 182.85 131.25L182.84 131.261L148.605 107.325C149.256 105.997 149.769 104.664 150.169 103.375L185.409 128.011ZM196.851 0.0251582C197.028 -0.0161594 197.203 -0.00582061 197.347 0.0505488L197.382 0.0329707L197.482 0.125744C197.512 0.146888 197.539 0.170045 197.563 0.196057L197.601 0.236096L201.382 3.74781L207.844 11.0193C208.017 11.211 208.043 11.4771 207.903 11.7302C206.782 13.7479 201.402 22.8336 192.1 29.0994C182.829 35.3597 173.804 41.4342 171.763 42.8093C171.507 42.9832 171.176 43.0206 170.93 42.9031C169.053 42.0566 161.164 38.5815 157.072 39.0261L151.398 42.9929V37.9597L154.122 36.0564C155.721 34.461 164.914 25.2725 171.904 18.3728L177.35 12.9627L182.606 7.74098L182.592 7.74586C182.615 7.72517 182.64 7.70408 182.664 7.68336L182.795 7.5525L182.844 7.52809C186.228 4.59182 190.523 1.47334 196.851 0.0251582ZM10.6474 0.0505488C10.7909 -0.00563156 10.9653 -0.0161019 11.1426 0.0251582C17.4684 1.47293 21.7621 4.59052 25.1465 7.52613L25.1982 7.5525L25.3379 7.69117C25.3587 7.70936 25.3806 7.72769 25.4013 7.74586L25.3886 7.74098L30.6445 12.9627L36.0888 18.3728C43.0749 25.2681 52.2607 34.4493 53.8681 36.0535L54.7881 36.6961V41.7293L50.9228 39.0271C46.8312 38.5813 38.9403 42.0557 37.0635 42.9021C36.817 43.02 36.4858 42.9834 36.2304 42.8093C34.1889 41.4343 25.165 35.3596 15.8945 29.0994C6.59199 22.8334 1.21077 13.7475 0.0898177 11.7302C-0.0502329 11.4771 -0.0235827 11.2111 0.149388 11.0193L6.6113 3.74781L10.3867 0.241955L10.4297 0.196057C10.4539 0.169837 10.4821 0.147025 10.5117 0.125744L10.6123 0.0329707L10.6474 0.0505488Z" fill="#2e2e2e"/>
+<mask id="mask0_gate" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="60" y="47" width="87" height="81">
+<path d="M97.8084 47.6837C99.7152 47.5824 101.661 47.6521 103.571 47.6483C105.051 47.6454 106.643 47.5295 108.108 47.712C108.727 47.789 109.321 47.9629 109.869 48.2644C110.857 48.8006 111.582 49.7172 111.877 50.8014C112.207 51.971 112.084 53.2681 111.478 54.3275C110.787 55.5335 109.709 56.0934 108.414 56.4366C108.43 58.0108 108.552 59.5822 108.779 61.1401C110.308 71.5983 115.879 81.0394 124.295 87.4341C130.466 92.0766 139.09 95.3246 146.871 94.2227C146.882 95.4202 146.905 96.6263 146.81 97.82C146.517 101.519 145.271 105.224 143.079 108.232C137.479 115.918 127.388 117.018 118.779 118.796C113.887 119.806 109.779 120.687 105.854 124.059C104.822 124.991 103.958 126.046 103.201 127.209C101.638 125.114 99.8746 123.389 97.5862 122.094C94.7714 120.502 91.6618 119.824 88.5305 119.169C80.596 117.511 71.2894 116.455 65.518 110.138C61.5413 105.784 59.7683 100.054 60.0529 94.2189C60.4073 94.2729 60.7601 94.2994 61.1178 94.3192C69.8695 94.8049 78.262 91.0864 84.6758 85.2852C91.0811 79.4916 95.3764 71.1979 96.8522 62.7268C97.212 60.6619 97.3384 58.5588 97.4459 56.468C96.7755 56.2921 96.148 56.0933 95.5646 55.7018C94.5641 55.0399 93.8864 53.9893 93.6961 52.8048C93.509 51.6358 93.7765 50.3906 94.4934 49.4403C95.3116 48.3554 96.502 47.8546 97.8084 47.6837Z" fill="#1071AE"/>
+</mask>
+<g mask="url(#mask0_gate)">
+<path d="M97.8084 47.6837C99.7152 47.5824 101.661 47.6521 103.571 47.6483C105.051 47.6454 106.643 47.5295 108.108 47.712C108.727 47.789 109.321 47.9629 109.869 48.2644C110.857 48.8006 111.582 49.7172 111.877 50.8014C112.207 51.971 112.084 53.2681 111.478 54.3275C110.787 55.5335 109.709 56.0934 108.414 56.4366C108.43 58.0108 108.552 59.5822 108.779 61.1401C110.308 71.5983 115.879 81.0394 124.295 87.4341C130.466 92.0766 139.09 95.3246 146.871 94.2227C146.882 95.4202 146.905 96.6263 146.81 97.82C146.517 101.519 145.271 105.224 143.079 108.232C137.479 115.918 127.388 117.018 118.779 118.796C113.887 119.806 109.779 120.687 105.854 124.059C104.822 124.991 103.958 126.046 103.201 127.209C101.638 125.114 99.8746 123.389 97.5862 122.094C94.7714 120.502 91.6618 119.824 88.5305 119.169C80.596 117.511 71.2894 116.455 65.518 110.138C61.5413 105.784 59.7683 100.054 60.0529 94.2189C60.4073 94.2729 60.7601 94.2994 61.1178 94.3192C69.8695 94.8049 78.262 91.0864 84.6758 85.2852C91.0811 79.4916 95.3764 71.1979 96.8522 62.7268C97.212 60.6619 97.3384 58.5588 97.4459 56.468C96.7755 56.2921 96.148 56.0933 95.5646 55.7018C94.5641 55.0399 93.8864 53.9893 93.6961 52.8048C93.509 51.6358 93.7765 50.3906 94.4934 49.4403C95.3116 48.3554 96.502 47.8546 97.8084 47.6837Z" fill="#2e2e2e"/>
+</g>
+<path d="M134.769 23.125C138.749 24.4471 142.755 25.9303 146.66 27.4587L146.638 87.6228C142.64 87.5395 138.521 86.3534 134.758 85.0716L134.769 23.125Z" fill="#2e2e2e"/>
+<path d="M71.8793 23.0391L71.9617 23.1143C72.1724 24.3266 72.0016 26.7636 72.0016 28.0802L71.9993 39.6664L72.009 84.9623C68.2742 86.2195 64.2435 87.5458 60.2726 87.6083C60.0396 87.2107 60.1887 32.6106 60.1763 27.2805C61.5478 26.8564 62.9011 26.3053 64.2509 25.814L71.8793 23.0391Z" fill="#2e2e2e"/>
+<path d="M88.6853 18.4298C88.8544 18.3849 88.9211 18.386 89.0852 18.4474C89.2435 19.9858 89.1228 21.6431 89.1208 23.1967L89.1184 32.2235L89.1212 47.4774C89.1215 50.3859 89.1907 53.3146 89.0854 56.2211C88.7584 65.2521 86.1268 71.8134 79.408 78.0614L79.2044 78.1882C79.0753 77.9743 79.0843 77.7906 79.0768 77.5436C79.0193 75.6294 79.0922 73.6831 79.0922 71.7651L79.0918 58.9303L79.0887 20.4271C82.2103 19.7074 85.5112 18.8182 88.6853 18.4298Z" fill="#2e2e2e"/>
+<path d="M117.725 18.3516C120.954 18.9789 124.17 19.6738 127.37 20.4357L127.354 78.1323C126.842 77.4847 126.149 76.9262 125.565 76.3364C122.258 73.0515 119.902 68.9315 118.748 64.415C117.665 60.2178 117.71 56.0612 117.712 51.7643L117.714 42.696L117.725 18.3516Z" fill="#2e2e2e"/>
+<path d="M96.3273 18.0121L109.667 18.0078L109.654 40.1149C105.223 40.0226 100.777 40.0915 96.3436 40.104C96.177 32.8316 96.3297 25.3073 96.3273 18.0121Z" fill="#2e2e2e"/>
+<path d="M96.3517 18.0121L103.136 18.0078L103.13 40.1598C100.876 40.0673 98.6147 40.1364 96.36 40.1489C96.2752 32.8616 96.3529 25.3221 96.3517 18.0121Z" fill="#2e2e2e"/>
+</svg>
+    <div class="oar">DistanceCoach</div>
+    <p>Needs access to the motion sensor (stroke rate), compass (course) and GPS (position, speed, split) to show the chart and gauges.</p>
+    <p class="madeBy">Made by SWE Marathon Rowers</p>
+  </div>
+  <div class="actions">
+    <button id="btnGrant">Enable sensors</button>
+    <button class="skip" id="btnSkip">Continue without / already allowed</button>
+  </div>
+</div>
+
+<div id="app">
+  <div id="stats">
+    <button id="menuBtn" aria-label="Menu">
+      <svg viewBox="0 0 208 132" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M56.3564 104.401C56.8042 105.671 57.363 106.97 58.0576 108.255L25.1533 131.261L25.1445 131.25C24.5513 131.66 23.5009 131.273 22.7939 130.379C22.0869 129.484 21.9903 128.432 22.5849 128.011L56.3564 104.401ZM185.409 128.011C186.003 128.432 185.907 129.484 185.2 130.379C184.493 131.273 183.443 131.66 182.85 131.25L182.84 131.261L148.605 107.325C149.256 105.997 149.769 104.664 150.169 103.375L185.409 128.011ZM196.851 0.0251582C197.028 -0.0161594 197.203 -0.00582061 197.347 0.0505488L197.382 0.0329707L197.482 0.125744C197.512 0.146888 197.539 0.170045 197.563 0.196057L197.601 0.236096L201.382 3.74781L207.844 11.0193C208.017 11.211 208.043 11.4771 207.903 11.7302C206.782 13.7479 201.402 22.8336 192.1 29.0994C182.829 35.3597 173.804 41.4342 171.763 42.8093C171.507 42.9832 171.176 43.0206 170.93 42.9031C169.053 42.0566 161.164 38.5815 157.072 39.0261L151.398 42.9929V37.9597L154.122 36.0564C155.721 34.461 164.914 25.2725 171.904 18.3728L177.35 12.9627L182.606 7.74098L182.592 7.74586C182.615 7.72517 182.64 7.70408 182.664 7.68336L182.795 7.5525L182.844 7.52809C186.228 4.59182 190.523 1.47334 196.851 0.0251582ZM10.6474 0.0505488C10.7909 -0.00563156 10.9653 -0.0161019 11.1426 0.0251582C17.4684 1.47293 21.7621 4.59052 25.1465 7.52613L25.1982 7.5525L25.3379 7.69117C25.3587 7.70936 25.3806 7.72769 25.4013 7.74586L25.3886 7.74098L30.6445 12.9627L36.0888 18.3728C43.0749 25.2681 52.2607 34.4493 53.8681 36.0535L54.7881 36.6961V41.7293L50.9228 39.0271C46.8312 38.5813 38.9403 42.0557 37.0635 42.9021C36.817 43.02 36.4858 42.9834 36.2304 42.8093C34.1889 41.4343 25.165 35.3596 15.8945 29.0994C6.59199 22.8334 1.21077 13.7475 0.0898177 11.7302C-0.0502329 11.4771 -0.0235827 11.2111 0.149388 11.0193L6.6113 3.74781L10.3867 0.241955L10.4297 0.196057C10.4539 0.169837 10.4821 0.147025 10.5117 0.125744L10.6123 0.0329707L10.6474 0.0505488Z" fill="#2e2e2e"/>
+<mask id="mask0_brand" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="60" y="47" width="87" height="81">
+<path d="M97.8084 47.6837C99.7152 47.5824 101.661 47.6521 103.571 47.6483C105.051 47.6454 106.643 47.5295 108.108 47.712C108.727 47.789 109.321 47.9629 109.869 48.2644C110.857 48.8006 111.582 49.7172 111.877 50.8014C112.207 51.971 112.084 53.2681 111.478 54.3275C110.787 55.5335 109.709 56.0934 108.414 56.4366C108.43 58.0108 108.552 59.5822 108.779 61.1401C110.308 71.5983 115.879 81.0394 124.295 87.4341C130.466 92.0766 139.09 95.3246 146.871 94.2227C146.882 95.4202 146.905 96.6263 146.81 97.82C146.517 101.519 145.271 105.224 143.079 108.232C137.479 115.918 127.388 117.018 118.779 118.796C113.887 119.806 109.779 120.687 105.854 124.059C104.822 124.991 103.958 126.046 103.201 127.209C101.638 125.114 99.8746 123.389 97.5862 122.094C94.7714 120.502 91.6618 119.824 88.5305 119.169C80.596 117.511 71.2894 116.455 65.518 110.138C61.5413 105.784 59.7683 100.054 60.0529 94.2189C60.4073 94.2729 60.7601 94.2994 61.1178 94.3192C69.8695 94.8049 78.262 91.0864 84.6758 85.2852C91.0811 79.4916 95.3764 71.1979 96.8522 62.7268C97.212 60.6619 97.3384 58.5588 97.4459 56.468C96.7755 56.2921 96.148 56.0933 95.5646 55.7018C94.5641 55.0399 93.8864 53.9893 93.6961 52.8048C93.509 51.6358 93.7765 50.3906 94.4934 49.4403C95.3116 48.3554 96.502 47.8546 97.8084 47.6837Z" fill="#1071AE"/>
+</mask>
+<g mask="url(#mask0_brand)">
+<path d="M97.8084 47.6837C99.7152 47.5824 101.661 47.6521 103.571 47.6483C105.051 47.6454 106.643 47.5295 108.108 47.712C108.727 47.789 109.321 47.9629 109.869 48.2644C110.857 48.8006 111.582 49.7172 111.877 50.8014C112.207 51.971 112.084 53.2681 111.478 54.3275C110.787 55.5335 109.709 56.0934 108.414 56.4366C108.43 58.0108 108.552 59.5822 108.779 61.1401C110.308 71.5983 115.879 81.0394 124.295 87.4341C130.466 92.0766 139.09 95.3246 146.871 94.2227C146.882 95.4202 146.905 96.6263 146.81 97.82C146.517 101.519 145.271 105.224 143.079 108.232C137.479 115.918 127.388 117.018 118.779 118.796C113.887 119.806 109.779 120.687 105.854 124.059C104.822 124.991 103.958 126.046 103.201 127.209C101.638 125.114 99.8746 123.389 97.5862 122.094C94.7714 120.502 91.6618 119.824 88.5305 119.169C80.596 117.511 71.2894 116.455 65.518 110.138C61.5413 105.784 59.7683 100.054 60.0529 94.2189C60.4073 94.2729 60.7601 94.2994 61.1178 94.3192C69.8695 94.8049 78.262 91.0864 84.6758 85.2852C91.0811 79.4916 95.3764 71.1979 96.8522 62.7268C97.212 60.6619 97.3384 58.5588 97.4459 56.468C96.7755 56.2921 96.148 56.0933 95.5646 55.7018C94.5641 55.0399 93.8864 53.9893 93.6961 52.8048C93.509 51.6358 93.7765 50.3906 94.4934 49.4403C95.3116 48.3554 96.502 47.8546 97.8084 47.6837Z" fill="#2e2e2e"/>
+</g>
+<path d="M134.769 23.125C138.749 24.4471 142.755 25.9303 146.66 27.4587L146.638 87.6228C142.64 87.5395 138.521 86.3534 134.758 85.0716L134.769 23.125Z" fill="#2e2e2e"/>
+<path d="M71.8793 23.0391L71.9617 23.1143C72.1724 24.3266 72.0016 26.7636 72.0016 28.0802L71.9993 39.6664L72.009 84.9623C68.2742 86.2195 64.2435 87.5458 60.2726 87.6083C60.0396 87.2107 60.1887 32.6106 60.1763 27.2805C61.5478 26.8564 62.9011 26.3053 64.2509 25.814L71.8793 23.0391Z" fill="#2e2e2e"/>
+<path d="M88.6853 18.4298C88.8544 18.3849 88.9211 18.386 89.0852 18.4474C89.2435 19.9858 89.1228 21.6431 89.1208 23.1967L89.1184 32.2235L89.1212 47.4774C89.1215 50.3859 89.1907 53.3146 89.0854 56.2211C88.7584 65.2521 86.1268 71.8134 79.408 78.0614L79.2044 78.1882C79.0753 77.9743 79.0843 77.7906 79.0768 77.5436C79.0193 75.6294 79.0922 73.6831 79.0922 71.7651L79.0918 58.9303L79.0887 20.4271C82.2103 19.7074 85.5112 18.8182 88.6853 18.4298Z" fill="#2e2e2e"/>
+<path d="M117.725 18.3516C120.954 18.9789 124.17 19.6738 127.37 20.4357L127.354 78.1323C126.842 77.4847 126.149 76.9262 125.565 76.3364C122.258 73.0515 119.902 68.9315 118.748 64.415C117.665 60.2178 117.71 56.0612 117.712 51.7643L117.714 42.696L117.725 18.3516Z" fill="#2e2e2e"/>
+<path d="M96.3273 18.0121L109.667 18.0078L109.654 40.1149C105.223 40.0226 100.777 40.0915 96.3436 40.104C96.177 32.8316 96.3297 25.3073 96.3273 18.0121Z" fill="#2e2e2e"/>
+<path d="M96.3517 18.0121L103.136 18.0078L103.13 40.1598C100.876 40.0673 98.6147 40.1364 96.36 40.1489C96.2752 32.8616 96.3529 25.3221 96.3517 18.0121Z" fill="#2e2e2e"/>
+</svg>
+    </button>
+
+    <div class="cell mono" id="c-split">
+      <div class="lbl">Split</div>
+      <div class="v" id="splitVal">--:--</div>
+      <div class="u">/500m</div>
+    </div>
+    <div class="cell mono" id="c-spm">
+      <div class="lbl">Stroke Rate</div>
+      <div class="v" id="spmVal">--</div>
+      <div class="u">spm</div>
+    </div>
+    <div class="cell mono" id="c-dist">
+      <div class="lbl">Distance</div>
+      <div class="v" id="distVal">0.0</div>
+      <div class="u">km</div>
+    </div>
+    <div class="cell mono" id="c-time">
+      <div class="lbl">Time</div>
+      <div class="v" id="timerVal">00:00</div>
+      <div class="u">&nbsp;</div>
+    </div>
+
+    <button id="btnReset" aria-label="Reset">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4V9H9" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4.5 15C5.36814 17.0483 6.98815 18.6835 9.02469 19.5715C11.0612 20.4595 13.3592 20.5323 15.4472 19.775C17.5352 19.0177 19.2528 17.4884 20.2483 15.5033C21.2438 13.5182 21.4412 11.2295 20.8 9.10999C20.1588 6.99048 18.7275 5.19042 16.8 4.09309C14.8725 2.99576 12.5977 2.68655 10.4488 3.23056C8.29985 3.77457 6.44064 5.12909 5.26 7.00999L4 9" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="12.5" cy="13" r="1.4" fill="#2e2e2e"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="mapViewport">
+    <div id="map"></div>
+    <div id="navReadout" class="mono hidden">—</div>
+    <div id="courseReadout" class="mono">--° --</div>
+    <button id="btnRecenter" class="hidden" aria-label="Recenter on my position">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="3" stroke="#2e2e2e" stroke-width="2"/>
+        <path d="M12 2V5" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round"/>
+        <path d="M12 19V22" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round"/>
+        <path d="M2 12H5" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round"/>
+        <path d="M19 12H22" stroke="#2e2e2e" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<div id="menuPanel" class="hidden">
+  <div id="menuHeader">
+    <div class="menuTabs">
+      <button class="tabBtn active" data-tab="history">History</button>
+      <button class="tabBtn" data-tab="waypoints">Waypoints</button>
+    </div>
+    <button id="menuClose" aria-label="Close">✕</button>
+  </div>
+  <div class="tabPane" id="tab-history">
+    <div id="historyList" class="mono"></div>
+  </div>
+  <div class="tabPane hidden" id="tab-waypoints">
+    <div id="wpMapWrap"><div id="wpMap"></div></div>
+    <div id="wpControls" class="mono">
+      <label>Register waypoint within <input type="number" id="wpRadius" value="15" min="3" max="200"> m of the point</label>
+      <div id="wpTotal" class="wpTotal"></div>
+      <div id="wpList"></div>
+      <div class="wpActions">
+        <button id="wpClear">Clear</button>
+        <button id="wpSaveNav">Save &amp; Navigate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  function $(id){ return document.getElementById(id); }
+
+  // ================= MAP =================
+  const mapEl = document.getElementById('map');
+  const mapViewportEl = document.getElementById('mapViewport');
+  // dragging is handled ourselves (see "natural look-around panning" below) so the
+  // pan direction stays correct while the map is visually rotated for rowing.
+  const map = L.map('map', { zoomControl:false, attributionControl:true, dragging:false, inertia:false })
+    .setView([57.78, 14.16], 13); // Jönköping default
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, className: 'baseGray',
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '&copy; OpenSeaMap'
+  }).addTo(map);
+  setTimeout(() => map.invalidateSize(), 50);
+  window.addEventListener('resize', () => map.invalidateSize());
+  window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 200));
+
+  // Breadcrumb trail — "where you've been"
+  let trackPoints = [];
+  let trackLine = L.polyline([], { color:'#2e2e2e', weight:3, opacity:0.85 }).addTo(map);
+
+  const boatIcon = L.divIcon({
+    className: '', html: '<div class="boatMarker"><div class="boatArrow"></div></div>',
+    iconSize:[30,30], iconAnchor:[15,15]
+  });
+  let boatMarker = null;
+
+  // Follow mode: true while the map auto-centers on the boat. Panning around
+  // to look at the chart naturally turns this off; the recenter button turns
+  // it back on and snaps back to the current position.
+  let followMode = true;
+  const btnRecenter = $('btnRecenter');
+  function setFollowMode(on){
+    followMode = on;
+    btnRecenter.classList.toggle('hidden', on);
+  }
+
+  function setBoatPosition(lat, lon){
+    if(!boatMarker){
+      boatMarker = L.marker([lat,lon], {icon: boatIcon, zIndexOffset: 1000}).addTo(map);
+    } else {
+      boatMarker.setLatLng([lat,lon]);
+    }
+    if(followMode) map.setView([lat,lon], Math.max(map.getZoom(), 16));
+  }
+
+  btnRecenter.addEventListener('click', () => {
+    setFollowMode(true);
+    if(lastPos) map.setView([lastPos.lat, lastPos.lon], Math.max(map.getZoom(), 16));
+  });
+
+  // ---------- natural look-around panning ----------
+  // #map is rotated via CSS transform for course-up navigation, but Leaflet's
+  // own drag handler computes pan deltas in un-rotated screen space, which
+  // feels wrong once the chart is spun round. Instead we track the finger/
+  // mouse drag ourselves on the (non-rotated) viewport and counter-rotate the
+  // delta by the map's current rotation before handing it to Leaflet.
+  let dragPointerId = null, dragLastX = 0, dragLastY = 0;
+  function toRad(d){ return d * Math.PI / 180; }
+  function rotateVector(dx, dy, angleDeg){
+    const a = toRad(angleDeg);
+    const cos = Math.cos(a), sin = Math.sin(a);
+    return { x: dx*cos - dy*sin, y: dx*sin + dy*cos };
+  }
+  mapViewportEl.addEventListener('pointerdown', e => {
+    if(!e.isPrimary || dragPointerId !== null) return;
+    if(e.target.closest('#btnRecenter')) return;
+    dragPointerId = e.pointerId; dragLastX = e.clientX; dragLastY = e.clientY;
+    try{ mapViewportEl.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  mapViewportEl.addEventListener('pointermove', e => {
+    if(dragPointerId !== e.pointerId) return;
+    const dx = e.clientX - dragLastX, dy = e.clientY - dragLastY;
+    dragLastX = e.clientX; dragLastY = e.clientY;
+    if(dx === 0 && dy === 0) return;
+    if(followMode) setFollowMode(false);
+    // rotate the on-screen drag vector into the map's own (unrotated) space
+    const v = rotateVector(dx, dy, -mapRotationAccum);
+    map.panBy([-v.x, -v.y], { animate:false });
+  });
+  function endDrag(e){ if(dragPointerId === e.pointerId) dragPointerId = null; }
+  mapViewportEl.addEventListener('pointerup', endDrag);
+  mapViewportEl.addEventListener('pointercancel', endDrag);
+  mapViewportEl.addEventListener('wheel', e => {
+    e.preventDefault();
+    if(followMode) setFollowMode(false);
+    if(e.deltaY < 0) map.zoomIn(); else map.zoomOut();
+  }, { passive:false });
+
+  // Course-up rotation: the whole map turns beneath a fixed "up-pointing"
+  // boat icon. Rowers sit facing the stern — backwards relative to travel —
+  // so the screen's "up" is reversed (heading + 180°) from a normal car/
+  // marine nav display, even though the displayed compass reading itself
+  // stays the true course over ground.
+  let mapRotationAccum = 0;
+  function rotateMapTo(headingDeg){
+    const reversedForRowing = (headingDeg + 180) % 360;
+    const target = -reversedForRowing;
+    let current = ((mapRotationAccum % 360) + 540) % 360 - 180;
+    let delta = ((target - current + 540) % 360) - 180;
+    mapRotationAccum += delta;
+    mapEl.style.transform = `translate(-50%,-50%) rotate(${mapRotationAccum}deg)`;
+  }
+
+  // ================= STATE =================
+  let sessionStartMs = Date.now();
+
+  let lastPos = null;
+  let totalDistanceM = 0;
+  let smoothedSpeed = 0;
+
+  let strokeTimes = [];
+  let totalStrokes = 0;
+  let motionBuffer = [];
+  let lastPeakT = 0;
+  let baseline = 0;
+  let risingEdge = false;
+
+  let currentHeadingDeg = null;
+  let lastGpsHeadingAt = 0;
+
+  const timerEl = $('timerVal');
+  const spmEl = $('spmVal'), splitEl = $('splitVal'), distEl = $('distVal');
+  const courseReadout = $('courseReadout');
+  const navReadoutEl = $('navReadout');
+  const gate = $('gate');
+
+  // ---------- session timer (runs continuously from page load) ----------
+  function fmtTime(ms){
+    const total = Math.floor(ms/1000);
+    const h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
+    const p = n => String(n).padStart(2,'0');
+    return h>0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+  }
+  // Cell font-size is clamp()-based, which can't know the exact rendered box
+  // on every device (safe areas, notch, aspect ratio). This measures the
+  // actual box after each update and shrinks the number just enough to fit,
+  // so a longer value — like an hour-plus timer "1:23:45" — never crowds or
+  // clips against the cell's edges.
+  function fitValue(el){
+    if(!el) return;
+    const cell = el.closest('.cell');
+    if(!cell) return;
+    el.style.fontSize = '';
+    const maxWidth = cell.clientWidth * 0.84;
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    let guard = 0;
+    while(el.scrollWidth > maxWidth && size > 14 && guard < 40){
+      size -= 2;
+      el.style.fontSize = size + 'px';
+      guard++;
+    }
+  }
+  function fitAllValues(){ [timerEl, spmEl, splitEl, distEl].forEach(fitValue); }
+  window.addEventListener('resize', fitAllValues);
+  window.addEventListener('orientationchange', () => setTimeout(fitAllValues, 250));
+
+  function tickTimer(){ timerEl.textContent = fmtTime(Date.now() - sessionStartMs); fitValue(timerEl); }
+  setInterval(tickTimer, 200);
+
+  function resetAll(){
+    saveSessionToHistory();
+    sessionStartMs = Date.now();
+    totalDistanceM = 0; smoothedSpeed = 0; lastPos = null;
+    strokeTimes = []; totalStrokes = 0; lastPeakT = 0;
+    trackPoints = []; trackLine.setLatLngs([]);
+    spmEl.textContent = '--'; splitEl.textContent = '--:--'; distEl.textContent = '0.0';
+    timerEl.textContent = '00:00';
+    fitAllValues();
+  }
+  $('btnReset').addEventListener('click', resetAll);
+
+  let wakeLock = null;
+  async function requestWakeLock(){
+    try{ if('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); } }catch(e){}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') requestWakeLock();
+  });
+
+  // ---------- geolocation: position / speed / split / distance / heading ----------
+  function haversine(a, b){
+    const R = 6371000;
+    const toRad = d => d*Math.PI/180;
+    const dLat = toRad(b.lat-a.lat), dLon = toRad(b.lon-a.lon);
+    const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(s));
+  }
+
+  function onPosition(pos){
+    const c = pos.coords;
+    const now = pos.timestamp || Date.now();
+    const p = { lat: c.latitude, lon: c.longitude, t: now };
+
+    setBoatPosition(p.lat, p.lon);
+    trackPoints.push([p.lat, p.lon]);
+    trackLine.setLatLngs(trackPoints);
+
+    // Speed: trust the GPS chipset's own (Doppler-derived) coords.speed whenever
+    // it's reported — it's normally solid even when position accuracy is
+    // mediocre. The old version only accepted it below 25m accuracy and, for
+    // the distance-based fallback, required the fix-to-fix movement to exceed
+    // the accuracy radius — at rowing speed (~1-4 m/s) that's almost always
+    // smaller than typical accuracy, so split effectively never updated.
+    let instSpeed = null;
+    if(typeof c.speed === 'number' && c.speed >= 0){
+      instSpeed = c.speed;
+    } else if(lastPos){
+      const dt = (p.t - lastPos.t)/1000;
+      if(dt > 0.2){
+        instSpeed = haversine(lastPos, p) / dt;
+      }
+    }
+
+    if(lastPos){
+      const d = haversine(lastPos, p);
+      const dt = (p.t - lastPos.t)/1000;
+      if(!(dt>0 && d/dt > 8 && c.accuracy > 15)){
+        totalDistanceM += d;
+      }
+    }
+
+    if(instSpeed !== null){
+      const alpha = 0.35;
+      smoothedSpeed = smoothedSpeed === 0 ? instSpeed : (alpha*instSpeed + (1-alpha)*smoothedSpeed);
+    }
+
+    const movingSpeed = instSpeed !== null ? instSpeed : smoothedSpeed;
+    if(typeof c.heading === 'number' && !isNaN(c.heading) && movingSpeed > 0.3){
+      lastGpsHeadingAt = Date.now();
+      updateCompass(c.heading);
+    }
+
+    lastPos = p;
+    renderSpeedSplitDist();
+    checkNavArrival(p);
+  }
+
+  function onPositionError(){}
+
+  function renderSpeedSplitDist(){
+    if(smoothedSpeed > 0.15){
+      const splitSec = 500 / smoothedSpeed;
+      const m = Math.floor(splitSec/60), s = Math.round(splitSec%60);
+      splitEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    } else {
+      splitEl.textContent = '--:--';
+    }
+    distEl.textContent = (totalDistanceM/1000).toFixed(1);
+    fitValue(splitEl); fitValue(distEl);
+  }
+
+  function startGeolocation(){
+    if(!('geolocation' in navigator)) return;
+    navigator.geolocation.watchPosition(onPosition, onPositionError, {
+      enableHighAccuracy: true, maximumAge: 500, timeout: 8000
+    });
+  }
+
+  // ---------- compass: 0-360° true course, shown as-is; map rotation is reversed for rowing ----------
+  const COMPASS_16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  function degToCompass(deg){ return COMPASS_16[Math.round(deg/22.5) % 16]; }
+  function updateCompass(deg){
+    deg = ((deg % 360) + 360) % 360;
+    currentHeadingDeg = deg;
+    courseReadout.textContent = Math.round(deg) + '°  ' + degToCompass(deg);
+    rotateMapTo(deg);
+  }
+
+  function onOrientation(e, isAbsoluteEvent){
+    let heading = null;
+    if(typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+      heading = e.webkitCompassHeading; // iOS Safari — already true-north compass heading
+    } else if((e.absolute || isAbsoluteEvent) && typeof e.alpha === 'number'){
+      heading = 360 - e.alpha; // Android Chrome / generic absolute orientation
+    }
+    if(heading === null) return;
+    if(Date.now() - lastGpsHeadingAt > 2000){ updateCompass(heading); }
+  }
+  function startOrientation(){
+    // iOS fires plain 'deviceorientation' with webkitCompassHeading.
+    // Android/Chrome exposes true-north heading via the separate
+    // 'deviceorientationabsolute' event (plain 'deviceorientation' there
+    // is often relative-only), so listen to both.
+    window.addEventListener('deviceorientation', e => onOrientation(e, false));
+    window.addEventListener('deviceorientationabsolute', e => onOrientation(e, true));
+  }
+
+  // ---------- motion: stroke rate ----------
+  const STROKE_MIN_INTERVAL_MS = 700;
+  const MOTION_WINDOW = 40;
+
+  function magnitude(e){
+    const g = e.accelerationIncludingGravity || e.acceleration;
+    if(!g) return null;
+    const x=g.x||0, y=g.y||0, z=g.z||0;
+    return Math.sqrt(x*x+y*y+z*z);
+  }
+
+  function onMotion(e){
+    const mag = magnitude(e);
+    if(mag === null) return;
+
+    motionBuffer.push(mag);
+    if(motionBuffer.length > MOTION_WINDOW) motionBuffer.shift();
+    baseline = motionBuffer.reduce((a,b)=>a+b,0)/motionBuffer.length;
+    const detrended = mag - baseline;
+    const THRESH = 1.1;
+
+    const t = Date.now();
+    if(detrended > THRESH && !risingEdge && (t - lastPeakT) > STROKE_MIN_INTERVAL_MS){
+      risingEdge = true; lastPeakT = t;
+      strokeTimes.push(t);
+      totalStrokes++;
+      if(strokeTimes.length > 9) strokeTimes.shift();
+      updateSpm();
+    } else if(detrended < THRESH*0.3){
+      risingEdge = false;
+    }
+  }
+
+  function updateSpm(){
+    if(strokeTimes.length < 2) return;
+    const intervals = [];
+    for(let i=1;i<strokeTimes.length;i++) intervals.push(strokeTimes[i]-strokeTimes[i-1]);
+    const avgMs = intervals.reduce((a,b)=>a+b,0)/intervals.length;
+    spmEl.textContent = (60000/avgMs).toFixed(0);
+    fitValue(spmEl);
+  }
+
+  setInterval(()=>{
+    if(strokeTimes.length && (Date.now()-strokeTimes[strokeTimes.length-1]) > 4000){
+      spmEl.textContent = '--'; strokeTimes = [];
+    }
+  }, 1000);
+
+  function startMotion(){ window.addEventListener('devicemotion', onMotion); }
+
+  // ================= HISTORY (Strava-style list of past passes) =================
+  function fmtDateSv(iso){
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'}) + ' · ' +
+      d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  }
+  function loadHistory(){
+    try{ return JSON.parse(localStorage.getItem('oar_sessions') || '[]'); }catch(e){ return []; }
+  }
+  function saveSessionToHistory(){
+    if(totalDistanceM < 50) return; // ignore trivial/aborted sessions
+    const durationMs = Date.now() - sessionStartMs;
+    const avgSpeed = totalDistanceM / (durationMs/1000);
+    const avgSplitSec = avgSpeed > 0.1 ? 500/avgSpeed : null;
+    const avgSpm = totalStrokes > 0 ? totalStrokes / (durationMs/60000) : null;
+    const session = { date: new Date().toISOString(), distanceM: Math.round(totalDistanceM), durationMs, avgSplitSec, avgSpm };
+    let hist = loadHistory();
+    hist.unshift(session);
+    hist = hist.slice(0, 30);
+    try{ localStorage.setItem('oar_sessions', JSON.stringify(hist)); }catch(e){}
+  }
+  function renderHistory(){
+    const hist = loadHistory();
+    const el = $('historyList');
+    if(!hist.length){
+      el.innerHTML = '<div class="histEmpty">No saved sessions yet.<br>A session is saved automatically when you press Reset.</div>';
+      return;
+    }
+    el.innerHTML = hist.map(s => {
+      const km = (s.distanceM/1000).toFixed(2);
+      const dur = fmtTime(s.durationMs);
+      const split = s.avgSplitSec ? `${String(Math.floor(s.avgSplitSec/60)).padStart(2,'0')}:${String(Math.round(s.avgSplitSec%60)).padStart(2,'0')}` : '--:--';
+      const spm = s.avgSpm ? s.avgSpm.toFixed(0) : '--';
+      return `<div class="histItem">
+        <div class="histDate">${fmtDateSv(s.date)}</div>
+        <div class="histMain">${km} km</div>
+        <div class="histRow"><span>⏱ ${dur}</span><span>⌀ ${split}/500m</span><span>${spm} spm</span></div>
+      </div>`;
+    }).join('');
+  }
+
+  // ================= WAYPOINTS (planning map + arrival radius) =================
+  let wpMap = null;
+  let wpWaypoints = [];
+  let wpMarkers = [];
+  let wpLine = null;
+
+  function initWpMap(){
+    if(wpMap) return;
+    try{
+      const saved = JSON.parse(localStorage.getItem('oar_waypoints') || 'null');
+      if(Array.isArray(saved)) wpWaypoints = saved;
+      const r = localStorage.getItem('oar_wpRadius');
+      if(r) $('wpRadius').value = r;
+    }catch(e){}
+
+    wpMap = L.map('wpMap', { zoomControl:true, attributionControl:false })
+      .setView(lastPos ? [lastPos.lat, lastPos.lon] : [57.78, 14.16], lastPos ? 15 : 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(wpMap);
+    L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { maxZoom:18 }).addTo(wpMap);
+    wpLine = L.polyline([], { color:'#FD08FF', weight:3, dashArray:'6,6' }).addTo(wpMap);
+    wpMap.on('click', e => {
+      wpWaypoints.push({ lat: e.latlng.lat, lon: e.latlng.lng });
+      renderWpMap();
+    });
+    renderWpMap();
+  }
+
+  function renderWpMap(){
+    wpMarkers.forEach(m => wpMap.removeLayer(m));
+    wpMarkers = [];
+    const latlngs = [];
+    wpWaypoints.forEach((wp, i) => {
+      const marker = L.marker([wp.lat, wp.lon], {
+        icon: L.divIcon({ className:'', html:`<div class="wpDot">${i+1}</div>`, iconSize:[24,24], iconAnchor:[12,12] })
+      }).addTo(wpMap);
+      wpMarkers.push(marker);
+      latlngs.push([wp.lat, wp.lon]);
+    });
+    wpLine.setLatLngs(latlngs);
+
+    let totalM = 0;
+    for(let i=1;i<wpWaypoints.length;i++) totalM += haversine(wpWaypoints[i-1], wpWaypoints[i]);
+    const totalEl = $('wpTotal');
+    if(wpWaypoints.length < 2){
+      totalEl.innerHTML = '';
+    } else {
+      const totalTxt = totalM >= 1000 ? (totalM/1000).toFixed(2)+' km' : Math.round(totalM)+' m';
+      totalEl.innerHTML = `<span class="wpTotalLbl">Total distance</span>${totalTxt}`;
+    }
+
+    const listEl = $('wpList');
+    if(!wpWaypoints.length){
+      listEl.innerHTML = '<div class="histEmpty">Tap the map to add waypoints in order.</div>';
+    } else {
+      listEl.innerHTML = wpWaypoints.map((wp,i) => {
+        let distTxt = '—';
+        if(i>0){
+          const d = haversine(wpWaypoints[i-1], wp);
+          distTxt = d >= 1000 ? (d/1000).toFixed(2)+' km' : Math.round(d)+' m';
+        }
+        return `<div class="wpRow"><span class="wpName">WP ${i+1}</span><span class="wpDist">${distTxt}</span><button data-i="${i}" class="wpDel">✕</button></div>`;
+      }).join('');
+      listEl.querySelectorAll('.wpDel').forEach(btn => btn.addEventListener('click', () => {
+        wpWaypoints.splice(Number(btn.dataset.i), 1); renderWpMap();
+      }));
+    }
+  }
+
+  $('wpClear').addEventListener('click', () => { wpWaypoints = []; renderWpMap(); });
+
+  // ---------- navigation on the main course-up map ----------
+  let navWaypoints = [];
+  let navIndex = 0;
+  let navActive = false;
+  let waypointRadiusM = 15;
+  let navLine = null;
+  let navMarkers = [];
+
+  function startNavigation(){
+    navWaypoints = wpWaypoints.slice();
+    navIndex = 0;
+    navMarkers.forEach(m => map.removeLayer(m));
+    navMarkers = [];
+    if(navLine){ map.removeLayer(navLine); navLine = null; }
+    navActive = navWaypoints.length > 0;
+    if(navActive){
+      const latlngs = navWaypoints.map(wp => [wp.lat, wp.lon]);
+      navLine = L.polyline(latlngs, { color:'#FD08FF', weight:3, dashArray:'6,6' }).addTo(map);
+      navWaypoints.forEach((wp,i) => {
+        const marker = L.marker([wp.lat, wp.lon], {
+          icon: L.divIcon({ className:'', html:`<div class="wpDot">${i+1}</div>`, iconSize:[24,24], iconAnchor:[12,12] })
+        }).addTo(map);
+        navMarkers.push(marker);
+      });
+      navReadoutEl.classList.remove('hidden');
+      updateNavReadout();
+    } else {
+      navReadoutEl.classList.add('hidden');
+    }
+  }
+
+  function updateNavReadout(){
+    if(!navActive || navIndex >= navWaypoints.length){ navReadoutEl.classList.add('hidden'); return; }
+    const target = navWaypoints[navIndex];
+    const d = lastPos ? haversine(lastPos, target) : null;
+    const distTxt = d===null ? '—' : (d>=1000 ? (d/1000).toFixed(2)+' km' : Math.round(d)+' m');
+    navReadoutEl.textContent = `→ WP ${navIndex+1}/${navWaypoints.length} · ${distTxt}`;
+  }
+
+  function checkNavArrival(p){
+    if(!navActive || navIndex >= navWaypoints.length) return;
+    const target = navWaypoints[navIndex];
+    const d = haversine(p, target);
+    if(d <= waypointRadiusM){
+      navIndex++;
+      if(navIndex >= navWaypoints.length){
+        navActive = false;
+        navReadoutEl.textContent = 'Destination reached';
+        setTimeout(() => navReadoutEl.classList.add('hidden'), 4000);
+        return;
+      }
+    }
+    updateNavReadout();
+  }
+
+  $('wpSaveNav').addEventListener('click', () => {
+    const radius = Math.max(3, Number($('wpRadius').value) || 15);
+    try{
+      localStorage.setItem('oar_waypoints', JSON.stringify(wpWaypoints));
+      localStorage.setItem('oar_wpRadius', String(radius));
+    }catch(e){}
+    waypointRadiusM = radius;
+    startNavigation();
+    $('menuPanel').classList.add('hidden');
+  });
+
+  // ---------- menu shell: tabs + open/close ----------
+  const menuPanel = $('menuPanel');
+  const tabBtns = document.querySelectorAll('.tabBtn');
+  const tabPanes = { history: $('tab-history'), waypoints: $('tab-waypoints') };
+
+  $('menuBtn').addEventListener('click', () => {
+    menuPanel.classList.remove('hidden');
+    renderHistory();
+    initWpMap();
+    setTimeout(() => wpMap && wpMap.invalidateSize(), 60);
+  });
+  $('menuClose').addEventListener('click', () => menuPanel.classList.add('hidden'));
+  tabBtns.forEach(btn => btn.addEventListener('click', () => {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    Object.values(tabPanes).forEach(p => p.classList.add('hidden'));
+    tabPanes[btn.dataset.tab].classList.remove('hidden');
+    if(btn.dataset.tab === 'waypoints') setTimeout(() => wpMap && wpMap.invalidateSize(), 60);
+  }));
+
+  // ---------- "add to home screen" notice ----------
+  // No page can remove its own browser's address bar — that's a deliberate
+  // browser security rule (otherwise any site could impersonate the browser
+  // chrome itself). The only real fix is installing the page to the home
+  // screen, which launches it with zero browser UI on both iOS and Android.
+  (function initA2HS(){
+    const isStandalone = window.navigator.standalone === true ||
+      (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches ||
+                              window.matchMedia('(display-mode: fullscreen)').matches));
+    if(isStandalone) return;
+    let dismissed = false;
+    try{ dismissed = localStorage.getItem('oar_a2hs_dismissed') === '1'; }catch(e){}
+    if(dismissed) return;
+
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const instr = $('a2hsInstr');
+    instr.textContent = isIOS
+      ? 'Tap the Share icon, then "Add to Home Screen" — then open DistanceCoach from that icon for a true fullscreen view.'
+      : 'Open your browser menu and choose "Add to Home screen" / "Install app" — then open DistanceCoach from that icon for a true fullscreen view.';
+
+    $('a2hsBanner').classList.remove('hidden');
+    $('a2hsClose').addEventListener('click', () => {
+      $('a2hsBanner').classList.add('hidden');
+      try{ localStorage.setItem('oar_a2hs_dismissed', '1'); }catch(e){}
+    });
+  })();
+
+  // ---------- fullscreen (must be triggered from a user gesture) ----------
+  function requestFullscreenIfPossible(){
+    try{
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+      if(req && !document.fullscreenElement && !document.webkitFullscreenElement){
+        req.call(el).catch(()=>{});
+      }
+    }catch(e){}
+  }
+
+  // ---------- permission gate ----------
+  async function grantSensors(){
+    let motionOk = true, orientationOk = true, gpsOk = true;
+    try{
+      if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+        motionOk = (await DeviceMotionEvent.requestPermission()) === 'granted';
+      }
+    }catch(e){ motionOk = false; }
+    try{
+      if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+        orientationOk = (await DeviceOrientationEvent.requestPermission()) === 'granted';
+      }
+    }catch(e){ orientationOk = false; }
+    try{
+      await new Promise((resolve,reject)=>{ navigator.geolocation.getCurrentPosition(resolve, reject, {timeout:6000}); });
+    }catch(e){ gpsOk = false; }
+
+    if(motionOk) startMotion();
+    if(orientationOk) startOrientation();
+    if('geolocation' in navigator) startGeolocation();
+    requestWakeLock();
+    requestFullscreenIfPossible();
+
+    gate.classList.add('hidden');
+  }
+  $('btnGrant').addEventListener('click', grantSensors);
+  $('btnSkip').addEventListener('click', () => {
+    startMotion(); startOrientation(); startGeolocation(); requestWakeLock();
+    requestFullscreenIfPossible();
+    gate.classList.add('hidden');
+  });
+
+})();
+</script>
+</body>
+</html>
