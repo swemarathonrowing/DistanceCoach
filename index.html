@@ -55,12 +55,20 @@
 
   .cell .lbl{ font-size:12px; letter-spacing:2.5px; color:var(--ink); text-transform:uppercase; font-weight:300; margin-bottom:6px; }
   .cell .v{ font-weight:900; line-height:1; color:var(--ink); white-space:nowrap; font-variant-numeric:tabular-nums;
-    font-size:clamp(28px, 8.5vw, 64px); }
+    font-size:clamp(28px, 8.5vw, 64px); max-width:100%; }
   .cell .u{ font-size:12px; letter-spacing:1.5px; color:var(--ink); text-transform:uppercase; margin-top:6px; font-weight:300; }
 
+  /* Reset sits at the visual crossing point of the 2x2 grid. #stats carries
+     asymmetric safe-area padding (only on the device-facing edges), which
+     shifts its naive 50%/50% box center away from the grid's actual visual
+     center — the calc() below adds back half of that inset so the button
+     lines up with the crossing point on notched phones in landscape. */
   #btnReset{
-    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:5;
-    width:64px; height:64px; border-radius:22px; background:var(--paper); border:2.5px solid var(--line);
+    position:absolute; z-index:5;
+    left: calc(50% + (env(safe-area-inset-left, 0px) / 2));
+    top: calc(50% + (env(safe-area-inset-top, 0px) / 2) - (env(safe-area-inset-bottom, 0px) / 2));
+    transform:translate(-50%,-50%);
+    width:56px; height:56px; border-radius:20px; background:var(--paper); border:2.5px solid var(--line);
     display:flex; align-items:center; justify-content:center;
   }
   #btnReset svg{ width:26px; height:26px; }
@@ -76,7 +84,7 @@
   #menuBtn svg{ width:100%; height:100%; }
 
   /* ---------- chart panel ---------- */
-  #mapViewport{ flex:1 1 50%; position:relative; overflow:hidden; background:#dedbcd; }
+  #mapViewport{ flex:1 1 50%; position:relative; overflow:hidden; background:var(--paper); }
   #map{
     position:absolute; top:50%; left:50%; width:260%; height:260%;
     transform-origin:50% 50%; transform:translate(-50%,-50%) rotate(0deg);
@@ -439,7 +447,30 @@
     const p = n => String(n).padStart(2,'0');
     return h>0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
   }
-  function tickTimer(){ timerEl.textContent = fmtTime(Date.now() - sessionStartMs); }
+  // Cell font-size is clamp()-based, which can't know the exact rendered box
+  // on every device (safe areas, notch, aspect ratio). This measures the
+  // actual box after each update and shrinks the number just enough to fit,
+  // so a longer value — like an hour-plus timer "1:23:45" — never crowds or
+  // clips against the cell's edges.
+  function fitValue(el){
+    if(!el) return;
+    const cell = el.closest('.cell');
+    if(!cell) return;
+    el.style.fontSize = '';
+    const maxWidth = cell.clientWidth * 0.84;
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    let guard = 0;
+    while(el.scrollWidth > maxWidth && size > 14 && guard < 40){
+      size -= 2;
+      el.style.fontSize = size + 'px';
+      guard++;
+    }
+  }
+  function fitAllValues(){ [timerEl, spmEl, splitEl, distEl].forEach(fitValue); }
+  window.addEventListener('resize', fitAllValues);
+  window.addEventListener('orientationchange', () => setTimeout(fitAllValues, 250));
+
+  function tickTimer(){ timerEl.textContent = fmtTime(Date.now() - sessionStartMs); fitValue(timerEl); }
   setInterval(tickTimer, 200);
 
   function resetAll(){
@@ -450,6 +481,7 @@
     trackPoints = []; trackLine.setLatLngs([]);
     spmEl.textContent = '--'; splitEl.textContent = '--:--'; distEl.textContent = '0.0';
     timerEl.textContent = '00:00';
+    fitAllValues();
   }
   $('btnReset').addEventListener('click', resetAll);
 
@@ -479,14 +511,19 @@
     trackPoints.push([p.lat, p.lon]);
     trackLine.setLatLngs(trackPoints);
 
+    // Speed: trust the GPS chipset's own (Doppler-derived) coords.speed whenever
+    // it's reported — it's normally solid even when position accuracy is
+    // mediocre. The old version only accepted it below 25m accuracy and, for
+    // the distance-based fallback, required the fix-to-fix movement to exceed
+    // the accuracy radius — at rowing speed (~1-4 m/s) that's almost always
+    // smaller than typical accuracy, so split effectively never updated.
     let instSpeed = null;
-    if(typeof c.speed === 'number' && c.speed >= 0 && c.accuracy < 25){
+    if(typeof c.speed === 'number' && c.speed >= 0){
       instSpeed = c.speed;
     } else if(lastPos){
       const dt = (p.t - lastPos.t)/1000;
       if(dt > 0.2){
-        const d = haversine(lastPos, p);
-        if(c.accuracy < 20 || d > c.accuracy){ instSpeed = d/dt; }
+        instSpeed = haversine(lastPos, p) / dt;
       }
     }
 
@@ -525,6 +562,7 @@
       splitEl.textContent = '--:--';
     }
     distEl.textContent = (totalDistanceM/1000).toFixed(1);
+    fitValue(splitEl); fitValue(distEl);
   }
 
   function startGeolocation(){
@@ -602,6 +640,7 @@
     for(let i=1;i<strokeTimes.length;i++) intervals.push(strokeTimes[i]-strokeTimes[i-1]);
     const avgMs = intervals.reduce((a,b)=>a+b,0)/intervals.length;
     spmEl.textContent = (60000/avgMs).toFixed(0);
+    fitValue(spmEl);
   }
 
   setInterval(()=>{
